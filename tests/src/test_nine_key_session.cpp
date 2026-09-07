@@ -81,8 +81,13 @@ int main()
     require(session.select(candidate(session, "你好")).commit == "你好" && session.snapshot().preedit.empty(),
             "phrase selection");
     type(session, "64426");
+    view = session.snapshot();
+    auto spelling = std::find(view.nine_key_spellings.begin(), view.nine_key_spellings.end(), "ni");
+    session.choose_nine_key_spelling(spelling - view.nine_key_spellings.begin());
+    session.choose_nine_key_spelling(0); // hao, the preferred remaining syllable
     require(session.select(candidate(session, "你")).commit == "你" && session.snapshot().editing_text == "426",
             "partial selection");
+    require(session.snapshot().preedit == "hao", "partial selection lost the locked suffix");
     require(session.finish().commit == "好" && session.snapshot().preedit.empty(), "finish residual");
     type(session, "64");
     session.command(Command::Backspace);

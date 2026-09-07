@@ -131,7 +131,8 @@ void NineKeySession::refresh()
             const auto code = encode(canonical);
             if (code.empty() || (!starts(code, digits_) && !starts(digits_, code)))
                 continue;
-            if (!locked_key.empty() && canonical != locked_key && !starts(canonical, locked_key + "'"))
+            if (!locked_key.empty() && canonical != locked_key && !starts(canonical, locked_key + "'") &&
+                !starts(locked_key, canonical + "'"))
                 continue;
             candidate.pinyin = digits_.substr(0, std::min(code.size(), digits_.size()));
             candidates_.push_back(std::move(candidate));
@@ -178,7 +179,12 @@ KeyResult NineKeySession::select(std::size_t index)
         return {};
     const auto selected = candidates_[index];
     digits_.erase(0, selected.pinyin.size());
-    locked_.clear();
+    auto consumed = selected.pinyin.size();
+    while (!locked_.empty() && consumed >= locked_.front().size())
+    {
+        consumed -= locked_.front().size();
+        locked_.erase(locked_.begin());
+    }
     refresh();
     return {true, selected.word, {}};
 }
