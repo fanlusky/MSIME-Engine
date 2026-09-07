@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/metasequoiaime/MSIME-Engine/compare/v0.4.0...v0.4.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **japanese:** map immutable sentence model on POSIX ([e40ea08](https://github.com/metasequoiaime/MSIME-Engine/commit/e40ea087f558ba97b84cafa2ce2edc08f37f8bc6))
+* **japanese:** reduce sentence-model heap memory ([d7fd49b](https://github.com/metasequoiaime/MSIME-Engine/commit/d7fd49bb71fe5b303a9081415c30fdb2940de997))
+
 ## [0.4.0](https://github.com/metasequoiaime/MSIME-Engine/compare/v0.3.0...v0.4.0) (2026-09-07)
 
 
