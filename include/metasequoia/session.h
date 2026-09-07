@@ -35,6 +35,7 @@ struct SessionSnapshot
     // ASCII source text and offset, separate from rendered preedit (e.g. Japanese kana).
     std::string editing_text;
     std::size_t caret_position = 0;
+    std::vector<std::string> nine_key_spellings;
 };
 
 // Stable platform entry point. One host serializes calls to its session; distinct sessions
@@ -49,6 +50,9 @@ class Session
     Session &operator=(const Session &) = delete;
 
     KeyResult character(char value, bool shift_only = false);
+    // Call after finishing composition when changing keyboard layout. Only quanpin uses digits.
+    void set_nine_key_enabled(bool enabled);
+    KeyResult choose_nine_key_spelling(std::size_t index);
     KeyResult command(Command value);
     KeyResult candidate_key(char value);
     KeyResult punctuation(char value);
