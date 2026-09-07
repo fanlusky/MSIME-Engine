@@ -120,7 +120,10 @@ void test_runtime_isolation()
         const auto valid = bytes(path);
         const auto bad = root / "invalid-japanese.dat";
         const auto rejected = [&](const std::string &data) {
-            { std::ofstream output(bad, std::ios::binary); output.write(data.data(), data.size()); }
+            {
+                std::ofstream output(bad, std::ios::binary);
+                output.write(data.data(), data.size());
+            }
             japanese::JapaneseSentenceDecoder decoder(path_to_utf8(bad));
             require(!decoder.ready() && decoder.ExactLemmas("かな").empty(), "Invalid Japanese model accepted");
         };

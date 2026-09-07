@@ -102,7 +102,9 @@ bool JapaneseSentenceDecoder::Load(const std::string &path)
     const int descriptor = open(path.c_str(), O_RDONLY);
     if (descriptor < 0)
         return false;
-    struct stat status{};
+    struct stat status
+    {
+    };
     if (fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) ||
         status.st_size < static_cast<off_t>(sizeof(ModelHeader)))
     {
@@ -125,8 +127,8 @@ bool JapaneseSentenceDecoder::Load(const std::string &path)
 #endif
     ModelHeader header{};
     std::memcpy(&header, storage.get(), sizeof(header));
-    if (std::memcmp(header.magic, kMagic, sizeof(kMagic)) != 0 || header.version != 1 ||
-        header.connection_size == 0 || header.token_count > 2000000 || header.string_size > (1ull << 32))
+    if (std::memcmp(header.magic, kMagic, sizeof(kMagic)) != 0 || header.version != 1 || header.connection_size == 0 ||
+        header.token_count > 2000000 || header.string_size > (1ull << 32))
         return false;
     const std::uint64_t connection_count = static_cast<std::uint64_t>(header.connection_size) * header.connection_size;
     const auto contains = [size](std::uint64_t offset, std::uint64_t length) {
@@ -190,7 +192,7 @@ JapaneseSentenceDecoder::Token JapaneseSentenceDecoder::TokenAt(size_t index) co
     ModelToken record{};
     std::memcpy(&record, token_data_ + index * sizeof(record), sizeof(record));
     return {record.reading_offset, record.surface_offset, record.reading_length, record.surface_length,
-            record.left_id, record.right_id, record.word_cost};
+            record.left_id,        record.right_id,       record.word_cost};
 }
 
 int JapaneseSentenceDecoder::ConnectionCost(std::uint16_t right_id, std::uint16_t left_id) const
