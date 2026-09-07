@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/metasequoiaime/MSIME-Engine/compare/v0.3.0...v0.4.0) (2026-09-07)
+
+
+### Features
+
+* **input:** add nine-key pinyin composition ([1f98a2b](https://github.com/metasequoiaime/MSIME-Engine/commit/1f98a2b10b8e072217a805e86d5c771e09269302))
+* **input:** add nine-key pinyin composition to public sessions ([e817376](https://github.com/metasequoiaime/MSIME-Engine/commit/e817376414e2e91cbc76266226d5668711c843bf))
+
+
+### Bug Fixes
+
+* **input:** prioritize the candidate reading in nine-key spelling choices ([29383dd](https://github.com/metasequoiaime/MSIME-Engine/commit/29383dd841ab663c0b34958f6b3abfa68ffded97))
+* **input:** retain locked nine-key syllables after partial selection ([7b614c1](https://github.com/metasequoiaime/MSIME-Engine/commit/7b614c16fa969a3a9ed29aaa594f9f5f2beab7e0))
+
 ## [0.3.0](https://github.com/metasequoiaime/MSIME-Engine/compare/v0.2.0...v0.3.0) (2026-09-06)
 
 
