@@ -148,6 +148,19 @@ void NineKeySession::refresh()
                       candidates_.end());
     if (candidates_.size() > 128)
         candidates_.resize(128);
+    // Keep the most likely reading visible without requiring a horizontal scroll.
+    if (!candidates_.empty())
+    {
+        const auto &canonical = candidates_.front().canonical_pinyin;
+        const auto offset = locked_key.empty() ? 0 : locked_key.size() + 1;
+        if (offset < canonical.size())
+        {
+            const auto preferred = canonical.substr(offset, canonical.find('\'', offset) - offset);
+            const auto found = std::find(spellings_.begin(), spellings_.end(), preferred);
+            if (found != spellings_.end())
+                std::rotate(spellings_.begin(), found, found + 1);
+        }
+    }
 }
 KeyResult NineKeySession::character(char digit)
 {

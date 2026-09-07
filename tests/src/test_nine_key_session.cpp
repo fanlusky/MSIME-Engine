@@ -69,6 +69,7 @@ int main()
                 session.snapshot().preedit == before,
             "invalid index changed composition");
     auto view = session.snapshot();
+    require(view.nine_key_spellings.front() == "ni", "preferred spelling was offscreen");
     const auto ni = std::find(view.nine_key_spellings.begin(), view.nine_key_spellings.end(), "ni");
     require(ni != view.nine_key_spellings.end(), "missing disambiguation");
     require(session.choose_nine_key_spelling(ni - view.nine_key_spellings.begin()).handled, "choose spelling");
@@ -76,6 +77,7 @@ int main()
     for (const auto &item : session.snapshot().candidates)
         require(item.word != "米", "lock failed");
     type(session, "426");
+    require(session.snapshot().nine_key_spellings.front() == "hao", "locked suffix spelling order");
     require(session.select(candidate(session, "你好")).commit == "你好" && session.snapshot().preedit.empty(),
             "phrase selection");
     type(session, "64426");
@@ -100,5 +102,11 @@ int main()
     session.switch_scheme(SchemeType::Quanpin);
     session.set_nine_key_enabled(false);
     require(session.character('n').handled && session.snapshot().editing_text == "n", "restore qwerty");
+    session.command(Command::Cancel);
+    session.set_nine_key_enabled(true);
+    type(session, std::string(32, '7'));
+    require(session.character('7').diagnostic.has_value() && session.snapshot().editing_text.size() == 32,
+            "digit limit did not preserve composition");
+    session.command(Command::Cancel);
     std::cout << "Nine-key input contract passed\n";
 }
