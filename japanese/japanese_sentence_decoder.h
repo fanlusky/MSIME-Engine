@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -57,6 +58,7 @@ class JapaneseSentenceDecoder
     };
 
     bool Load(const std::string &path);
+    Token TokenAt(size_t index) const;
     JapaneseLemma MakeLemma(std::uint32_t token_id) const;
     std::string_view Reading(const Token &token) const;
     std::string_view Surface(const Token &token) const;
@@ -69,9 +71,12 @@ class JapaneseSentenceDecoder
 
     bool ready_ = false;
     std::uint32_t connection_size_ = 0;
-    std::vector<Token> tokens_;
-    std::vector<std::int16_t> connection_costs_;
-    std::string strings_;
+    // Immutable model bytes: POSIX uses a read-only file mapping; Windows retains one byte buffer.
+    std::shared_ptr<const char> model_data_;
+    const char *token_data_ = nullptr;
+    const char *connection_data_ = nullptr;
+    const char *string_data_ = nullptr;
+    size_t token_count_ = 0;
     std::unordered_map<std::string, std::vector<std::uint32_t>> short_prefix_index_;
 };
 } // namespace japanese

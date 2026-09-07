@@ -2,6 +2,7 @@
 #include "../../core/data_path.h"
 #include "../../core/input_session.h"
 #include "../../core/pinyin_decoder.h"
+#include "../../japanese/japanese_sentence_decoder.h"
 #include "../../contracts/assets/assets.h"
 #include "../../user_dictionary/user_dictionary_journal.h"
 #include "test_directory_cleanup.h"
@@ -101,6 +102,41 @@ void test_runtime_isolation()
     make_resources(resource_b, "妮");
     make_japanese_model(resource_a / assets::japanese_model, "甲");
     make_japanese_model(resource_b / assets::japanese_model, "乙");
+    {
+        const auto path = root / "mapped-japanese.dat";
+        make_japanese_model(path, "甲");
+        japanese::JapaneseSentenceDecoder original(path_to_utf8(path));
+        require(original.ready() && original.ExactLemmas("かな").front().surface == "甲",
+                "Japanese model mapping did not load");
+        const auto replacement = root / "replacement-japanese.dat";
+        make_japanese_model(replacement, "乙");
+        // Publishers replace files, never truncate mapped inodes in place.
+        std::filesystem::remove(path);
+        std::filesystem::rename(replacement, path);
+        japanese::JapaneseSentenceDecoder updated(path_to_utf8(path));
+        require(updated.ready() && updated.ExactLemmas("かな").front().surface == "乙" &&
+                    original.ExactLemmas("かな").front().surface == "甲",
+                "Replacing a model altered an existing decoder");
+        const auto valid = bytes(path);
+        const auto bad = root / "invalid-japanese.dat";
+        const auto rejected = [&](const std::string &data) {
+            {
+                std::ofstream output(bad, std::ios::binary);
+                output.write(data.data(), data.size());
+            }
+            japanese::JapaneseSentenceDecoder decoder(path_to_utf8(bad));
+            require(!decoder.ready() && decoder.ExactLemmas("かな").empty(), "Invalid Japanese model accepted");
+        };
+        for (size_t length : {size_t(0), size_t(55), size_t(77), valid.size() - 1})
+            rejected(valid.substr(0, length));
+        auto invalid_offset = valid;
+        invalid_offset.replace(24, 8, 8, char(0xff));
+        rejected(invalid_offset);
+        auto invalid_reading = valid;
+        invalid_reading[60] = char(0xff);
+        invalid_reading[61] = char(0xff);
+        rejected(invalid_reading);
+    }
     const auto reject_overlap = [&](const std::filesystem::path &resources, const std::filesystem::path &user,
                                     const std::filesystem::path &cache) {
         bool rejected = false;
