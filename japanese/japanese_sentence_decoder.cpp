@@ -7,6 +7,12 @@
 #include <fstream>
 #include <string_view>
 #include <unordered_set>
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace
 {
@@ -77,67 +83,86 @@ JapaneseSentenceDecoder::JapaneseSentenceDecoder(std::string model_path)
 
 bool JapaneseSentenceDecoder::Load(const std::string &path)
 {
-    std::ifstream stream(metasequoia::path_from_utf8(path.c_str()), std::ios::binary);
-    ModelHeader header{};
-    if (!stream.read(reinterpret_cast<char *>(&header), sizeof(header)) ||
-        std::memcmp(header.magic, kMagic, sizeof(kMagic)) != 0 || header.version != 1 || header.connection_size == 0 ||
-        header.token_count > 2000000 || header.string_size > (1ull << 32))
+    std::shared_ptr<const char> storage;
+    std::uint64_t size = 0;
+#ifdef _WIN32
+    std::ifstream stream(metasequoia::path_from_utf8(path.c_str()), std::ios::binary | std::ios::ate);
+    const auto end = stream.tellg();
+    if (end < static_cast<std::streamoff>(sizeof(ModelHeader)))
         return false;
-
-    std::vector<ModelToken> records(header.token_count);
-    stream.seekg(static_cast<std::streamoff>(header.token_offset));
-    if (!stream.read(reinterpret_cast<char *>(records.data()),
-                     static_cast<std::streamsize>(records.size() * sizeof(ModelToken))))
+    size = static_cast<std::uint64_t>(end);
+    if (size > static_cast<std::uint64_t>(SIZE_MAX))
         return false;
-
-    const std::uint64_t connection_count = static_cast<std::uint64_t>(header.connection_size) * header.connection_size;
-    if (connection_count > 20000000)
+    auto buffer = std::make_unique<char[]>(static_cast<size_t>(size));
+    stream.seekg(0);
+    if (!stream.read(buffer.get(), static_cast<std::streamsize>(size)))
         return false;
-    connection_costs_.resize(static_cast<size_t>(connection_count));
-    stream.seekg(static_cast<std::streamoff>(header.connection_offset));
-    if (!stream.read(reinterpret_cast<char *>(connection_costs_.data()),
-                     static_cast<std::streamsize>(connection_costs_.size() * sizeof(std::int16_t))))
+    storage = std::shared_ptr<const char>(buffer.release(), [](const char *data) { delete[] data; });
+#else
+    const int descriptor = open(path.c_str(), O_RDONLY);
+    if (descriptor < 0)
         return false;
-
-    strings_.assign(static_cast<size_t>(header.string_size), '\0');
-    stream.seekg(static_cast<std::streamoff>(header.string_offset));
-    if (!stream.read(strings_.data(), static_cast<std::streamsize>(strings_.size())))
-        return false;
-
-    connection_size_ = header.connection_size;
-    tokens_.reserve(records.size());
-    for (const auto &record : records)
+    struct stat status{};
+    if (fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) ||
+        status.st_size < static_cast<off_t>(sizeof(ModelHeader)))
     {
-        if (static_cast<std::uint64_t>(record.reading_offset) + record.reading_length > strings_.size() ||
-            static_cast<std::uint64_t>(record.surface_offset) + record.surface_length > strings_.size() ||
-            record.left_id >= connection_size_ || record.right_id >= connection_size_)
-            return false;
-        Token token;
-        token.reading_offset = record.reading_offset;
-        token.reading_length = record.reading_length;
-        token.surface_offset = record.surface_offset;
-        token.surface_length = record.surface_length;
-        token.left_id = record.left_id;
-        token.right_id = record.right_id;
-        token.word_cost = record.word_cost;
-        tokens_.push_back(std::move(token));
-    }
-
-    // Version 1 models are emitted in reading order. Keeping the file order lets us
-    // binary-search the compact records directly and avoids building two million-scale
-    // indexes on the first Japanese keystroke.
-    if (!std::is_sorted(tokens_.begin(), tokens_.end(),
-                        [this](const Token &a, const Token &b) { return Reading(a) < Reading(b); }))
+        close(descriptor);
         return false;
+    }
+    size = static_cast<std::uint64_t>(status.st_size);
+    if (size > static_cast<std::uint64_t>(SIZE_MAX))
+    {
+        close(descriptor);
+        return false;
+    }
+    void *mapping = mmap(nullptr, static_cast<size_t>(size), PROT_READ, MAP_PRIVATE, descriptor, 0);
+    close(descriptor);
+    if (mapping == MAP_FAILED)
+        return false;
+    storage = std::shared_ptr<const char>(static_cast<const char *>(mapping), [size](const char *data) {
+        munmap(const_cast<char *>(data), static_cast<size_t>(size));
+    });
+#endif
+    ModelHeader header{};
+    std::memcpy(&header, storage.get(), sizeof(header));
+    if (std::memcmp(header.magic, kMagic, sizeof(kMagic)) != 0 || header.version != 1 ||
+        header.connection_size == 0 || header.token_count > 2000000 || header.string_size > (1ull << 32))
+        return false;
+    const std::uint64_t connection_count = static_cast<std::uint64_t>(header.connection_size) * header.connection_size;
+    const auto contains = [size](std::uint64_t offset, std::uint64_t length) {
+        return offset >= sizeof(ModelHeader) && offset <= size && length <= size - offset;
+    };
+    if (connection_count > 20000000 ||
+        !contains(header.token_offset, static_cast<std::uint64_t>(header.token_count) * sizeof(ModelToken)) ||
+        !contains(header.connection_offset, connection_count * sizeof(std::int16_t)) ||
+        !contains(header.string_offset, header.string_size))
+        return false;
+    model_data_ = std::move(storage);
+    token_data_ = model_data_.get() + header.token_offset;
+    connection_data_ = model_data_.get() + header.connection_offset;
+    string_data_ = model_data_.get() + header.string_offset;
+    token_count_ = header.token_count;
+    connection_size_ = header.connection_size;
+    for (size_t index = 0; index < token_count_; ++index)
+    {
+        const auto token = TokenAt(index);
+        if (static_cast<std::uint64_t>(token.reading_offset) + token.reading_length > header.string_size ||
+            static_cast<std::uint64_t>(token.surface_offset) + token.surface_length > header.string_size ||
+            token.left_id >= connection_size_ || token.right_id >= connection_size_)
+            return false;
+        // The file's reading order is the search index; reject corrupt or unsorted input.
+        if (index > 0 && Reading(token) < Reading(TokenAt(index - 1)))
+            return false;
+    }
 
     // Pending romaji such as "k" expands to several one-kana prefix queries. Those
     // ranges are by far the largest, so cache their best token IDs while the model is
     // already being warmed in the background. Readings are sorted, making each group
     // contiguous and keeping this pass linear with only a tiny permanent index.
     size_t group_start = 0;
-    while (group_start < tokens_.size())
+    while (group_start < token_count_)
     {
-        const auto first_reading = Reading(tokens_[group_start]);
+        const auto first_reading = Reading(TokenAt(group_start));
         const auto prefix_length = FirstUtf8CodePointLength(first_reading);
         if (prefix_length == 0)
             return false;
@@ -145,9 +170,9 @@ bool JapaneseSentenceDecoder::Load(const std::string &path)
         std::vector<std::uint32_t> best;
         best.reserve(kShortPrefixCandidateCount);
         size_t group_end = group_start;
-        for (; group_end < tokens_.size(); ++group_end)
+        for (; group_end < token_count_; ++group_end)
         {
-            const auto reading = Reading(tokens_[group_end]);
+            const auto reading = Reading(TokenAt(group_end));
             if (reading.size() < prefix_length || reading.compare(0, prefix_length, prefix) != 0)
                 break;
             KeepBestToken(best, static_cast<std::uint32_t>(group_end), kShortPrefixCandidateCount);
@@ -156,19 +181,31 @@ bool JapaneseSentenceDecoder::Load(const std::string &path)
         short_prefix_index_.emplace(prefix, std::move(best));
         group_start = group_end;
     }
-    return !tokens_.empty();
+    return token_count_ != 0;
+}
+
+JapaneseSentenceDecoder::Token JapaneseSentenceDecoder::TokenAt(size_t index) const
+{
+    // ModelToken is packed on disk; memcpy also supports unaligned offsets safely.
+    ModelToken record{};
+    std::memcpy(&record, token_data_ + index * sizeof(record), sizeof(record));
+    return {record.reading_offset, record.surface_offset, record.reading_length, record.surface_length,
+            record.left_id, record.right_id, record.word_cost};
 }
 
 int JapaneseSentenceDecoder::ConnectionCost(std::uint16_t right_id, std::uint16_t left_id) const
 {
-    if (right_id >= connection_size_ || left_id >= connection_size_)
+    if (!ready_ || right_id >= connection_size_ || left_id >= connection_size_)
         return 10000;
-    return connection_costs_[static_cast<size_t>(right_id) * connection_size_ + left_id];
+    std::int16_t cost = 0;
+    const auto index = static_cast<size_t>(right_id) * connection_size_ + left_id;
+    std::memcpy(&cost, connection_data_ + index * sizeof(cost), sizeof(cost));
+    return cost;
 }
 
 JapaneseLemma JapaneseSentenceDecoder::MakeLemma(std::uint32_t token_id) const
 {
-    const Token &token = tokens_[token_id];
+    const Token &token = TokenAt(token_id);
     return {std::string(Reading(token)),
             std::string(Surface(token)),
             token.left_id,
@@ -179,26 +216,32 @@ JapaneseLemma JapaneseSentenceDecoder::MakeLemma(std::uint32_t token_id) const
 
 std::string_view JapaneseSentenceDecoder::Reading(const Token &token) const
 {
-    return {strings_.data() + token.reading_offset, token.reading_length};
+    return {string_data_ + token.reading_offset, token.reading_length};
 }
 
 std::string_view JapaneseSentenceDecoder::Surface(const Token &token) const
 {
-    return {strings_.data() + token.surface_offset, token.surface_length};
+    return {string_data_ + token.surface_offset, token.surface_length};
 }
 
 size_t JapaneseSentenceDecoder::LowerBoundReading(std::string_view reading) const
 {
-    const auto it =
-        std::lower_bound(tokens_.begin(), tokens_.end(), reading,
-                         [this](const Token &token, std::string_view value) { return Reading(token) < value; });
-    return static_cast<size_t>(it - tokens_.begin());
+    size_t first = 0, last = token_count_;
+    while (first < last)
+    {
+        const auto middle = first + (last - first) / 2;
+        if (Reading(TokenAt(middle)) < reading)
+            first = middle + 1;
+        else
+            last = middle;
+    }
+    return first;
 }
 
 bool JapaneseSentenceDecoder::TokenCheaper(std::uint32_t a, std::uint32_t b) const
 {
-    if (tokens_[a].word_cost != tokens_[b].word_cost)
-        return tokens_[a].word_cost < tokens_[b].word_cost;
+    if (TokenAt(a).word_cost != TokenAt(b).word_cost)
+        return TokenAt(a).word_cost < TokenAt(b).word_cost;
     return a < b;
 }
 
@@ -253,9 +296,9 @@ std::vector<JapaneseLemma> JapaneseSentenceDecoder::ExactLemmas(const std::strin
     if (!ready_ || reading.empty() || limit == 0)
         return {};
     std::vector<std::uint32_t> matches;
-    for (size_t index = LowerBoundReading(reading); index < tokens_.size(); ++index)
+    for (size_t index = LowerBoundReading(reading); index < token_count_; ++index)
     {
-        if (Reading(tokens_[index]) != reading)
+        if (Reading(TokenAt(index)) != reading)
             break;
         matches.push_back(static_cast<std::uint32_t>(index));
     }
@@ -271,9 +314,9 @@ std::vector<JapaneseLemma> JapaneseSentenceDecoder::PrefixLemmas(const std::stri
         return MakeLemmas(cached->second, limit);
 
     std::vector<std::uint32_t> matches;
-    for (size_t index = LowerBoundReading(reading_prefix); index < tokens_.size(); ++index)
+    for (size_t index = LowerBoundReading(reading_prefix); index < token_count_; ++index)
     {
-        const auto token_reading = Reading(tokens_[index]);
+        const auto token_reading = Reading(TokenAt(index));
         if (token_reading.size() < reading_prefix.size() ||
             token_reading.compare(0, reading_prefix.size(), reading_prefix) != 0)
             break;
@@ -289,9 +332,9 @@ std::vector<JapaneseLemma> JapaneseSentenceDecoder::PrefixLemmasContinuing(const
     if (!ready_ || reading_prefix.empty() || next_kana.empty() || limit == 0)
         return {};
     std::vector<std::uint32_t> matches;
-    for (size_t index = LowerBoundReading(reading_prefix); index < tokens_.size(); ++index)
+    for (size_t index = LowerBoundReading(reading_prefix); index < token_count_; ++index)
     {
-        const auto token_reading = Reading(tokens_[index]);
+        const auto token_reading = Reading(TokenAt(index));
         if (token_reading.size() <= reading_prefix.size() ||
             token_reading.compare(0, reading_prefix.size(), reading_prefix) != 0)
             break;
