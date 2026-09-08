@@ -37,6 +37,25 @@ int main()
     CHECK(!FanyImeProtocol::AcceptReply(reply, 18)); // stale reconnect ACK
     CHECK(!FanyImeProtocol::AcceptReply(reply, 0));
 
+    const auto shortcutCapabilities = FanyImeProtocol::Capabilities | FanyImeProtocol::CharacterSetShortcut;
+    const auto shortcutHello = FanyImeProtocol::Hello(7, 20, shortcutCapabilities);
+    const auto oldServer = FanyImeProtocol::Negotiate(shortcutHello);
+    CHECK(oldServer.accepted);
+    CHECK((oldServer.capabilities & FanyImeProtocol::CharacterSetShortcut) == 0);
+    const auto newServer = FanyImeProtocol::Negotiate(shortcutHello, shortcutCapabilities);
+    CHECK(newServer.accepted);
+    CHECK((newServer.capabilities & FanyImeProtocol::CharacterSetShortcut) != 0);
+    const auto shortcutReply = FanyImeProtocol::Reply(shortcutHello, newServer);
+    CHECK(FanyImeProtocol::AcceptReply(shortcutReply, 20));
+    CHECK(FanyImeProtocol::ReplyCapabilities(shortcutReply) == shortcutCapabilities);
+    CHECK((FanyImeProtocol::Negotiate(hello, shortcutCapabilities).capabilities &
+           FanyImeProtocol::CharacterSetShortcut) == 0); // old client/new server
+    CHECK(FanyImeProtocol::IsCharacterSetShortcut('F', 3));
+    CHECK(FanyImeProtocol::IsCharacterSetShortcut('F', 0x80000003u));
+    for (unsigned modifiers = 0; modifiers < 8; ++modifiers)
+        CHECK(FanyImeProtocol::IsCharacterSetShortcut('F', modifiers) == (modifiers == 3));
+    CHECK(!FanyImeProtocol::IsCharacterSetShortcut('E', 3));
+
     hello.wch += 1;
     result = FanyImeProtocol::Negotiate(hello);
     CHECK(!result.accepted);
