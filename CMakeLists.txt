@@ -70,6 +70,7 @@ set(METASEQUOIA_IME_ENGINE_SOURCES
     shuangpin/shuangpin_utils.cpp
     user_dictionary/user_dictionary_journal.cpp
     user_dictionary/personal_dictionary.cpp
+    user_dictionary/dictionary_state.cpp
     googlepinyinime-rev/src/share/dictbuilder.cpp
     googlepinyinime-rev/src/share/dictlist.cpp
     googlepinyinime-rev/src/share/dicttrie.cpp
@@ -168,6 +169,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_data_path PRIVATE MetasequoiaIme::Engine)
     add_test(NAME data_path COMMAND test_data_path)
 
+    add_executable(test_dictionary_state tests/src/test_dictionary_state.cpp)
+    target_link_libraries(test_dictionary_state PRIVATE MetasequoiaImeEngine)
+    add_test(NAME dictionary_state COMMAND test_dictionary_state)
+    add_test(NAME dictionary_state_capacity COMMAND test_dictionary_state --capacity)
+
     add_executable(test_personal_dictionary tests/src/test_personal_dictionary.cpp)
     target_link_libraries(test_personal_dictionary PRIVATE MetasequoiaImeEngine)
     add_test(NAME personal_dictionary COMMAND test_personal_dictionary)
@@ -175,6 +181,10 @@ if(BUILD_TESTING)
     add_executable(test_candidate_removal tests/src/test_candidate_removal.cpp)
     target_link_libraries(test_candidate_removal PRIVATE MetasequoiaIme::Engine)
     add_test(NAME candidate_removal COMMAND test_candidate_removal)
+
+    add_executable(test_fuzzy_pinyin tests/src/test_fuzzy_pinyin.cpp)
+    target_link_libraries(test_fuzzy_pinyin PRIVATE MetasequoiaIme::Engine)
+    add_test(NAME fuzzy_pinyin COMMAND test_fuzzy_pinyin)
 
     add_executable(test_engine_smoke tests/src/test_engine_smoke.cpp)
     target_link_libraries(test_engine_smoke PRIVATE MetasequoiaIme::Engine)
