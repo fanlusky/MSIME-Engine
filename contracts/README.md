@@ -31,6 +31,15 @@ Existing DLLs with unversioned hello remain accepted by the new Server using the
 
 Append opcodes; never change released values or reuse them. An incompatible layout needs a new major protocol and an explicit migration, not another copy of a header. Minor additions must be optional capabilities.
 
+`CharacterSetShortcut` is optional and is not included in the default capability set.
+Windows implementations that support it pass `Capabilities | CharacterSetShortcut`
+to `Hello` / `Negotiate`. Only after negotiating this bit may a Chinese-mode client
+consume Ctrl+Shift+F (no Alt or Windows modifier) and send the existing `KeyEvent`
+with keycode `F` and Shift/Control modifier bits. The server toggles the persisted
+character set without clearing composition, and refreshes the current candidate
+page and toolbar. It sends no key reply. Clients suppress auto-repeat and must not
+replay an ambiguously delivered toggle; older peers simply omit the optional bit.
+
 `tests/windows_ipc_contract.cpp` executes wire-layout/upgrade/framing cases on all Engine CI platforms and both Windows TSF architectures.
 
 `backend/protocol.json` 定义 MSIME-Backend 的可选共通 HTTP 服务 API，详见[后端协议与兼容性](backend/README.md)。

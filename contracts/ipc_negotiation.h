@@ -12,6 +12,9 @@ constexpr std::uint16_t Minor = 0;
 constexpr std::uint32_t RequestIds = 1u << 0;
 constexpr std::uint32_t FocusEpochs = 1u << 1;
 constexpr std::uint32_t FramedVoice = 1u << 2;
+// Optional: Ctrl+Shift+F KeyEvent toggles the configured character set without
+// changing composition. A consumer must opt in only after implementing it.
+constexpr std::uint32_t CharacterSetShortcut = 1u << 3;
 constexpr std::uint32_t Capabilities = RequestIds | FocusEpochs | FramedVoice;
 constexpr std::uint32_t RequiredCapabilities = RequestIds | FocusEpochs;
 
@@ -22,7 +25,8 @@ struct Negotiation
     std::uint32_t capabilities = 0;
 };
 
-inline FanyImeNamedpipeData Hello(std::uint64_t client, std::uint64_t request)
+inline FanyImeNamedpipeData Hello(std::uint64_t client, std::uint64_t request,
+                                  std::uint32_t capabilities = Capabilities)
 {
     FanyImeNamedpipeData hello{};
     hello.event_type = FanyImePipeEventType::ClientHello;
@@ -32,23 +36,23 @@ inline FanyImeNamedpipeData Hello(std::uint64_t client, std::uint64_t request)
     hello.wch = Major;
     hello.point[0] = Minor;
     hello.point[1] = static_cast<int>(RequiredCapabilities);
-    hello.modifiers_down = Capabilities;
+    hello.modifiers_down = capabilities;
     return hello;
 }
 
-inline Negotiation Negotiate(const FanyImeNamedpipeData &hello)
+inline Negotiation Negotiate(const FanyImeNamedpipeData &hello, std::uint32_t capabilities = Capabilities)
 {
     if (hello.event_type != FanyImePipeEventType::ClientHello || hello.client_id == 0)
         return {};
     // Existing installed DLLs use this exact unversioned hello shape. Retain
     // their established protocol during an upgrade without sending a new ACK.
     if (hello.keycode == 0 && hello.wch == 0 && hello.request_id == 0 && hello.modifiers_down == 0)
-        return {true, true, Capabilities};
+        return {true, true, capabilities};
     if (hello.keycode != Magic || hello.wch != Major || hello.request_id == 0 ||
         hello.request_id == FANY_IME_NO_REQUEST_ID || hello.point[0] < 0 || hello.point[1] < 0)
         return {};
     const auto required = static_cast<std::uint32_t>(hello.point[1]);
-    const auto common = hello.modifiers_down & Capabilities;
+    const auto common = hello.modifiers_down & capabilities;
     if ((required & common) != required || (common & RequiredCapabilities) != RequiredCapabilities)
         return {};
     return {true, false, common};
@@ -73,10 +77,20 @@ inline bool IsNegotiationReply(std::uint32_t type)
     return type == FanyImeReplyType::ProtocolReady || type == FanyImeReplyType::ProtocolMismatch;
 }
 
+inline std::uint32_t ReplyCapabilities(const FanyImeNamedpipeDataToTsf &reply)
+{
+    return static_cast<std::uint32_t>(reply.candidate_string[2]) |
+           (static_cast<std::uint32_t>(reply.candidate_string[3]) << 16);
+}
+
+constexpr bool IsCharacterSetShortcut(std::uint32_t keycode, std::uint32_t modifiers)
+{
+    return keycode == 'F' && (modifiers & 7u) == 3u;
+}
+
 inline bool AcceptReply(const FanyImeNamedpipeDataToTsf &reply, std::uint64_t expected_request)
 {
-    const auto capabilities = static_cast<std::uint32_t>(reply.candidate_string[2]) |
-                              (static_cast<std::uint32_t>(reply.candidate_string[3]) << 16);
+    const auto capabilities = ReplyCapabilities(reply);
     const auto magic = static_cast<std::uint32_t>(reply.candidate_string[4]) |
                        (static_cast<std::uint32_t>(reply.candidate_string[5]) << 16);
     return expected_request != 0 && reply.request_id == expected_request &&
